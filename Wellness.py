@@ -137,7 +137,7 @@ with tab_load:
 
     st.subheader("Acute:Chronic Workload Ratio (ACWR)")
     fig_acwr = px.line(df_acwr, x='Date', y='ACWR', color='Athlete_ID')
-    fig_acwr.add_hrect(y0=0.8, y1=1.3, fillcolor="green", opacity=0.5, annotation_text="Sweet Spot")
+    fig_acwr.add_hrect(y0=0.8, y1=1.3, fillcolor="green", opacity=0.2, annotation_text="Sweet Spot")
     fig_acwr.add_hline(y=0.8, line_dash="dot", line_color="blue", annotation_text="Under-training (<0.8)")
     fig_acwr.add_hline(y=1.5, line_dash="dash", line_color="red", annotation_text="High Risk (>1.5)")
     st.plotly_chart(fig_acwr, use_container_width=True)
