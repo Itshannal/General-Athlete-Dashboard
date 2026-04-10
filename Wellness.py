@@ -1,17 +1,23 @@
 ################ Importing Packages ################
-import streamlit as st #framework
-import pandas as pd #data analysis
-import plotly.express as px #graphing
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import date
 
 ################ Page Config ################
 st.set_page_config(page_title="Athlete Performance Dashboard", layout="wide")
 
-
 ################ Load Data ################
 @st.cache_data
 def load_data():
-    df = pd.read_csv('athlete_data.csv')
-    df['Date'] = pd.to_datetime(df['Date'])
+    # Attempt to load, create if missing to prevent crash
+    try:
+        df = pd.read_csv('athlete_data.csv')
+        df['Date'] = pd.to_datetime(df['Date'])
+    except FileNotFoundError:
+        # Fallback empty dataframe with required columns
+        df = pd.DataFrame(columns=['Date', 'Athlete_ID', 'Load', 'HSD', 'Accel', 'Sleep', 'Fatigue', 'Stress', 'Soreness'])
     return df
 
 df = load_data()
@@ -21,11 +27,19 @@ st.sidebar.header("Filters")
 athlete_list = ["All"] + list(df['Athlete_ID'].unique())
 selected_athlete = st.sidebar.selectbox("Select Athlete", athlete_list)
 
+# Handle empty dataframe for date_input
+if not df.empty:
+    min_date = df['Date'].min().date()
+    max_date = df['Date'].max().date()
+else:
+    min_date = date.today()
+    max_date = date.today()
+
 date_range = st.sidebar.date_input(
     "Date Range",
-    value=(df['Date'].min(), df['Date'].max()),
-    min_value=df['Date'].min(),
-    max_value=df['Date'].max()
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
 )
 
 filtered_df = df.copy()
@@ -36,286 +50,80 @@ if isinstance(date_range, tuple) and len(date_range) == 2:
     start_date, end_date = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
     filtered_df = filtered_df[(filtered_df['Date'] >= start_date) & (filtered_df['Date'] <= end_date)]
 
-
-# ---CALCULATE ACWR  ---
+# --- FIXED ACWR CALCULATION ---
 def calculate_acwr(group):
-    group = group.sort_values('Date')
-    # Use 'on' if Date is a column, or set_index if you prefer
-    group = group.set_index('Date')
-    # Numeric_only=True ensures we don't try to roll on the Athlete_ID string
+    # Sort and set index to handle time-based rolling windows
+    group = group.sort_values('Date').set_index('Date')
+    
+    # We use '7D' and '28D' but fill missing days with 0 so the average is accurate
+    # Reindexing to a daily frequency ensures rest days are counted as 0 load
+    idx = pd.date_range(group.index.min(), group.index.max())
+    group = group.reindex(idx).fillna({'Load': 0, 'Athlete_ID': group['Athlete_ID'].iloc[0]})
+    
     acute = group['Load'].rolling(window='7D').mean()
     chronic = group['Load'].rolling(window='28D').mean()
+    
     group['ACWR'] = (acute / chronic)
-    return group.reset_index()
+    return group.reset_index().rename(columns={'index': 'Date'})
 
-
-if filtered_df.empty:
-    st.warning("No data found for the selected filters.")
+if not filtered_df.empty:
+    # Group by Athlete and apply calculation
+    df_acwr = filtered_df.groupby('Athlete_ID', group_keys=False).apply(calculate_acwr)
 else:
-    df_acwr = filtered_df.copy()
-
-
+    df_acwr = pd.DataFrame()
 
 ################# Main Tabs #################
 st.title("Athlete Monitoring")
-tab_load, tab_recovery, tab_analysis, tab_entry  = st.tabs(["Training Load", "Recovery & Wellness", "Advanced Analysis", "Data Entry"])
+tab_load, tab_recovery, tab_analysis, tab_entry = st.tabs(["Training Load", "Recovery & Wellness", "Advanced Analysis", "Data Entry"])
 
-# --- TAB 1: TRAINING LOAD ---
+# --- TAB 1: DATA ENTRY (Moved to end in code but stays as tab) ---
 with tab_entry:
-    st.header(" Data Entry")
-
-    import pandas as pd
-    import streamlit as st
-    from datetime import date
-
-    st.divider()
     st.header("Data Entry Form")
-
     with st.form("daily_entry_form", clear_on_submit=True):
         col1, col2, col3 = st.columns(3)
-
         with col1:
-            # Date and Athlete Selection
             entry_date = st.date_input("Session Date", value=date.today())
-            entry_athlete = st.selectbox("Athlete ID", df['Athlete_ID'].unique())
+            entry_athlete = st.selectbox("Athlete ID", df['Athlete_ID'].unique() if not df.empty else ["N/A"])
             entry_load = st.number_input("Training Load (AU)", min_value=0, max_value=2000, step=10)
-
         with col2:
-            # Performance Metrics
             entry_hsd = st.number_input("High Speed Distance (m)", min_value=0, max_value=5000, step=50)
             entry_accel = st.number_input("Accelerations", min_value=0, max_value=500, step=1)
             entry_sleep = st.slider("Sleep Duration (Hours)", 4.0, 12.0, 8.0, 0.5)
-
         with col3:
-            # Wellness Metrics (1-10)
-            entry_fatigue = st.select_slider("Fatigue Level (1=Fresh, 10=Exhausted)", options=range(1, 11), value=3)
-            entry_stress = st.select_slider("Stress Level (1=Low, 10=High)", options=range(1, 11), value=3)
-            entry_soreness = st.select_slider("Soreness Level (1=None, 10=Severe)", options=range(1, 11), value=3)
+            entry_fatigue = st.select_slider("Fatigue (1=Fresh, 10=Exhausted)", options=range(1, 11), value=3)
+            entry_stress = st.select_slider("Stress (1=Low, 10=High)", options=range(1, 11), value=3)
+            entry_soreness = st.select_slider("Soreness (1=None, 10=Severe)", options=range(1, 11), value=3)
 
         submitted = st.form_submit_button("Submit Session Data")
-
         if submitted:
-            # Create a new row
-            new_data = {
-                'Date': entry_date.strftime('%Y-%m-%d'),
-                'Athlete_ID': entry_athlete,
-                'Load': entry_load,
-                'HSD': entry_hsd,
-                'Accel': entry_accel,
-                'Sleep': entry_sleep,
-                'Fatigue': entry_fatigue,
-                'Stress': entry_stress,
-                'Soreness': entry_soreness
-            }
-
-            # Convert to DataFrame and append to CSV
-            new_df = pd.DataFrame([new_data])
+            new_row = [entry_date, entry_athlete, entry_load, entry_hsd, entry_accel, entry_sleep, entry_fatigue, entry_stress, entry_soreness]
+            new_df = pd.DataFrame([new_row])
             new_df.to_csv('athlete_data.csv', mode='a', header=False, index=False)
-
-            st.success(f"Data for {entry_athlete} on {entry_date} successfully saved!")
-            st.info("The charts above will update once the page refreshes.")
+            st.success("Data Saved! Please refresh page.")
             st.balloons()
+
     if st.button("Delete Last Entry"):
         df_current = pd.read_csv('athlete_data.csv')
         if not df_current.empty:
-            df_updated = df_current.iloc[:-1]  # Remove last row
-            df_updated.to_csv('athlete_data.csv', index=False)
-            st.warning("Last entry deleted. Please refresh the page.")
-        else:
-            st.error("CSV is already empty.")
+            df_current.iloc[:-1].to_csv('athlete_data.csv', index=False)
+            st.warning("Last entry deleted.")
 
-
-
-with tab_load:
-    st.header("Training Load")
-
-
-    st.subheader("Weekly Player Load")
-    df_plot = df_acwr.groupby(['Date', 'Athlete_ID'], as_index=False)['Load'].sum()
-    fig_load = px.line(df_plot, x='Date', y='Load', color='Athlete_ID', markers=True)
-    st.plotly_chart(fig_load, use_container_width=True)
-
-    st.subheader("High Speed Distance (HSD)")
-    fig_hsd = px.bar(filtered_df, x='Date', y='HSD', color='Athlete_ID', barmode='group')
-    st.plotly_chart(fig_hsd, use_container_width=True)
-
-    st.subheader("Acute:Chronic Workload Ratio (ACWR)")
-    fig_acwr = px.line(df_acwr, x='Date', y='ACWR', color='Athlete_ID')
-    fig_acwr.add_hrect(y0=0.8, y1=1.3, fillcolor="green", opacity=0.5, annotation_text="Sweet Spot")
-    fig_acwr.add_hline(y=0.8, line_dash="dot", line_color="blue", annotation_text="Under-training (<0.8)")
-    fig_acwr.add_hline(y=1.5, line_dash="dash", line_color="red", annotation_text="High Risk (>1.5)")
-    st.plotly_chart(fig_acwr, use_container_width=True)
-
-# --- TAB 2: RECOVERY & WELLNESS ---
-with tab_recovery:
-    st.header("Recovery & Wellness")
-
-    # KPI Tiles for quick viewing
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Average Sleep", f"{filtered_df['Sleep'].mean():.1f} hrs")
-    c2.metric("Average Fatigue", f"{filtered_df['Fatigue'].mean():.1f}/10")
-    c3.metric("Average Soreness", f"{filtered_df['Soreness'].mean():.1f}/10")
-
-
-
-
-    st.subheader("Sleep vs. Fatigue Correlation")
-        # Scatter plot to see if more sleep = less fatigue
-    fig_sleep = px.scatter(filtered_df, x='Sleep', y='Fatigue', color='Athlete_ID',
-                               trendline="ols")
-    st.plotly_chart(fig_sleep, use_container_width=True)
-
-
-    st.subheader("Stress Score Heatmap")
-    stress_pivot = filtered_df.pivot(index='Athlete_ID', columns='Date', values='Stress')
-    fig_heat = px.imshow(stress_pivot, color_continuous_scale='RdYlGn_r')
-    st.plotly_chart(fig_heat, use_container_width=True)
-
-    import plotly.graph_objects as go
-
-    #Radar Chart
-    if selected_athlete != "All":
-        st.subheader(f"Recovery Profile")
-
-        # 1. Get data for the specific athlete (Latest session)
-        athlete_latest = filtered_df[filtered_df['Athlete_ID'] == selected_athlete].iloc[-1]
-
-        # 2. Get Team Average for the same metrics
-        team_avg = df[['Sleep', 'Fatigue', 'Stress', 'Soreness']].mean()
-
-        # Define metrics for the radar
-        # Note: We "invert" Fatigue, Stress, and Soreness so that 10 is always 'GOOD'
-        categories = ['Sleep', 'Fatigue (Inverted)', 'Stress (Inverted)', 'Soreness (Inverted)']
-
-        athlete_values = [
-            (athlete_latest['Sleep'] / 9) * 10,  # Scale sleep to 10
-            11 - athlete_latest['Fatigue'],
-            11 - athlete_latest['Stress'],
-            11 - athlete_latest['Soreness']
-        ]
-
-        team_values = [
-            (team_avg['Sleep'] / 9) * 10,
-            11 - team_avg['Fatigue'],
-            11 - team_avg['Stress'],
-            11 - team_avg['Soreness']
-        ]
-
-        # Create Radar Chart
-        fig_radar = go.Figure()
-
-        fig_radar.add_trace(go.Scatterpolar(
-            r=athlete_values,
-            theta=categories,
-            fill='toself',
-            name=selected_athlete,
-            line_color='rgb(31, 119, 180)'
-        ))
-
-        fig_radar.add_trace(go.Scatterpolar(
-            r=team_values,
-            theta=categories,
-            fill='toself',
-            name='Team Average',
-            line_color='rgba(255, 0, 0, 0.5)',
-            line_dash='dot'
-        ))
-
-        fig_radar.update_layout(
-            polar=dict(
-                radialaxis=dict(visible=True, range=[0, 10])
-            ),
-            showlegend=True,
-            title=f"{selected_athlete}"
-        )
-
-        st.plotly_chart(fig_radar, use_container_width=True)
-    else:
-        st.info("Select a specific athlete in the sidebar to view their Readiness Radar.")
-
-# --- TAB 3: ADVANCED ANALYSIS ---
-with tab_analysis:
-    st.header("Team Correlations")
-    # Correlation Matrix
-    corr = filtered_df[['Load', 'HSD', 'Sleep', 'Fatigue', 'Stress', 'Soreness']].corr()
-    fig_corr = px.imshow(corr, text_auto=True, color_continuous_scale='RdBu_r')
-    st.plotly_chart(fig_corr, use_container_width=True)
-
-    st.subheader("Raw Filtered Data")
-    st.dataframe(filtered_df)
-
-
-if not df.empty:
-    athlete_list = ["All"] + sorted(list(df['Athlete_ID'].unique()))
-    selected_athlete = st.sidebar.selectbox("Select Athlete", athlete_list)
-
-    # Date Filter
-    min_date = df['Date'].min().date()
-    max_date = df['Date'].max().date()
-
-    date_range = st.sidebar.date_input(
-        "Date Range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
-    )
-
-    # Filtering Logic
-    filtered_df = df.copy()
-    if selected_athlete != "All":
-        filtered_df = filtered_df[filtered_df['Athlete_ID'] == selected_athlete]
-
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date = pd.to_datetime(date_range[0])
-        end_date = pd.to_datetime(date_range[1])
-        filtered_df = filtered_df[(filtered_df['Date'] >= start_date) & (filtered_df['Date'] <= end_date)]
-else:
-    st.sidebar.warning("No data found in CSV.")
-    filtered_df = pd.DataFrame()
-    selected_athlete = "All"
-
-
-# --- CALCULATE ACWR ---
-def calculate_acwr(group):
-    group = group.sort_values('Date').set_index('Date')
-    # Use 7D and 28D rolling averages
-    acute = group['Load'].rolling(window='7D').mean()
-    chronic = group['Load'].rolling(window='28D').mean()
-    group['ACWR'] = (acute / chronic)
-    return group.reset_index()
-
-
-if not filtered_df.empty and 'Load' in filtered_df.columns:
-    df_acwr = filtered_df.groupby('Athlete_ID', group_keys=False).apply(calculate_acwr)
-else:
-    df_acwr = filtered_df.copy()
-
-################# Main UI #################
-st.title("Athlete Monitoring Dashboard")
-tab_load, tab_recovery, tab_analysis, tab_entry = st.tabs([
-    "📈 Training Load", "🛌 Recovery & Wellness", "🔬 Advanced Analysis", "📝 Data Entry"
-])
-
-# --- TAB 1: TRAINING LOAD ---
+# --- TAB 2: TRAINING LOAD ---
 with tab_load:
     if not df_acwr.empty:
         st.subheader("Weekly Player Load")
         fig_load = px.line(df_acwr, x='Date', y='Load', color='Athlete_ID', markers=True)
         st.plotly_chart(fig_load, use_container_width=True)
 
-        st.subheader("High Speed Distance (HSD)")
-        fig_hsd = px.bar(filtered_df, x='Date', y='HSD', color='Athlete_ID', barmode='group')
-        st.plotly_chart(fig_hsd, use_container_width=True)
-
         st.subheader("Acute:Chronic Workload Ratio (ACWR)")
-        fig_acwr = px.line(df_acwr, x='Date', y='ACWR', color='Athlete_ID')
-        fig_acwr.add_hrect(y0=0.8, y1=1.3, fillcolor="green", opacity=0.1, annotation_text="Sweet Spot")
-        fig_acwr.add_hline(y=1.5, line_dash="dash", line_color="red", annotation_text="Danger Zone")
-        st.plotly_chart(fig_acwr, use_container_width=True)
+        fig_acwr_plot = px.line(df_acwr, x='Date', y='ACWR', color='Athlete_ID')
+        fig_acwr_plot.add_hrect(y0=0.8, y1=1.3, fillcolor="green", opacity=0.2, annotation_text="Sweet Spot")
+        fig_acwr_plot.add_hline(y=1.5, line_dash="dash", line_color="red", annotation_text="Danger Zone")
+        st.plotly_chart(fig_acwr_plot, use_container_width=True)
     else:
-        st.info("Please enter data in the 'Data Entry' tab to see analysis.")
+        st.info("No data available for the selected filters.")
 
-# --- TAB 2: RECOVERY & WELLNESS ---
+# --- TAB 3: RECOVERY & WELLNESS ---
 with tab_recovery:
     if not filtered_df.empty:
         c1, c2, c3 = st.columns(3)
@@ -323,86 +131,26 @@ with tab_recovery:
         c2.metric("Avg Fatigue", f"{filtered_df['Fatigue'].mean():.1f}/10")
         c3.metric("Avg Soreness", f"{filtered_df['Soreness'].mean():.1f}/10")
 
-        st.subheader("Sleep vs. Fatigue Correlation")
-        fig_sleep = px.scatter(filtered_df, x='Sleep', y='Fatigue', color='Athlete_ID', trendline="ols")
-        st.plotly_chart(fig_sleep, use_container_width=True)
-
-        # Radar Chart for Specific Athlete
         if selected_athlete != "All":
-            st.subheader(f"Readiness Radar: {selected_athlete}")
-            athlete_latest = filtered_df[filtered_df['Athlete_ID'] == selected_athlete].iloc[-1]
+            athlete_latest = filtered_df.iloc[-1]
             team_avg = df[['Sleep', 'Fatigue', 'Stress', 'Soreness']].mean()
-
-            categories = ['Sleep', 'Fatigue', 'Stress', 'Soreness']
-
-            # Normalizing/Inverting so "Outward" on radar is always "Good"
-            athlete_vals = [(athlete_latest['Sleep'] / 10) * 10, 11 - athlete_latest['Fatigue'],
-                            11 - athlete_latest['Stress'], 11 - athlete_latest['Soreness']]
-            team_vals = [(team_avg['Sleep'] / 10) * 10, 11 - team_avg['Fatigue'], 11 - team_avg['Stress'],
-                         11 - team_avg['Soreness']]
+            categories = ['Sleep', 'Fatigue (Inv)', 'Stress (Inv)', 'Soreness (Inv)']
+            
+            # Inverting scales so larger area = better recovery
+            a_vals = [(athlete_latest['Sleep']/9)*10, 11-athlete_latest['Fatigue'], 11-athlete_latest['Stress'], 11-athlete_latest['Soreness']]
+            t_vals = [(team_avg['Sleep']/9)*10, 11-team_avg['Fatigue'], 11-team_avg['Stress'], 11-team_avg['Soreness']]
 
             fig_radar = go.Figure()
-            fig_radar.add_trace(go.Scatterpolar(r=athlete_vals, theta=categories, fill='toself', name=selected_athlete))
-            fig_radar.add_trace(
-                go.Scatterpolar(r=team_vals, theta=categories, fill='toself', name='Team Avg', line_dash='dot'))
+            fig_radar.add_trace(go.Scatterpolar(r=a_vals, theta=categories, fill='toself', name=selected_athlete))
+            fig_radar.add_trace(go.Scatterpolar(r=t_vals, theta=categories, fill='toself', name='Team Avg'))
             fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 10])))
             st.plotly_chart(fig_radar, use_container_width=True)
     else:
-        st.info("No data available for recovery metrics.")
+        st.info("Adjust filters to see recovery data.")
 
-# --- TAB 3: ADVANCED ANALYSIS ---
+# --- TAB 4: ADVANCED ANALYSIS ---
 with tab_analysis:
-    if len(filtered_df) > 1:
-        st.header("Team Correlations")
-        numeric_cols = filtered_df.select_dtypes(include=['float64', 'int64']).columns
-        corr = filtered_df[numeric_cols].corr()
-        fig_corr = px.imshow(corr, text_auto=True, color_continuous_scale='RdBu_r')
-        st.plotly_chart(fig_corr, use_container_width=True)
-
-        st.subheader("Raw Filtered Data")
+    if not filtered_df.empty:
+        corr = filtered_df[['Load', 'HSD', 'Sleep', 'Fatigue', 'Stress', 'Soreness']].corr()
+        st.plotly_chart(px.imshow(corr, text_auto=True, color_continuous_scale='RdBu_r'), use_container_width=True)
         st.dataframe(filtered_df)
-    else:
-        st.info("Not enough data for correlation analysis.")
-
-# --- TAB 4: DATA ENTRY ---
-with tab_entry:
-    st.header("Daily Data Entry")
-    with st.form("entry_form", clear_on_submit=True):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            e_date = st.date_input("Date", value=date.today())
-            e_id = st.text_input("Athlete ID (e.g. Player_1)")
-            e_load = st.number_input("Load (AU)", 0, 2000, 300)
-        with col2:
-            e_hsd = st.number_input("HSD (m)", 0, 5000, 200)
-            e_accel = st.number_input("Accels", 0, 500, 20)
-            e_sleep = st.slider("Sleep (hrs)", 4.0, 12.0, 8.0)
-        with col3:
-            e_fatigue = st.slider("Fatigue (1-10)", 1, 10, 3)
-            e_stress = st.slider("Stress (1-10)", 1, 10, 3)
-            e_sore = st.slider("Soreness (1-10)", 1, 10, 3)
-
-        submitted = st.form_submit_button("Save Session")
-        if submitted:
-            if not e_id:
-                st.error("Please enter an Athlete ID")
-            else:
-                new_row = pd.DataFrame([{
-                    'Date': e_date.strftime('%Y-%m-%d'),
-                    'Athlete_ID': e_id,
-                    'Load': e_load, 'HSD': e_hsd, 'Accel': e_accel,
-                    'Sleep': e_sleep, 'Fatigue': e_fatigue,
-                    'Stress': e_stress, 'Soreness': e_sore
-                }])
-                new_row.to_csv(CSV_FILE, mode='a', header=False, index=False)
-                st.cache_data.clear()  # Clear cache so data shows up immediately
-                st.success("Data Saved! Refreshing...")
-                st.rerun()
-
-    if st.button("🗑️ Delete Last Entry"):
-        df_current = pd.read_csv(CSV_FILE)
-        if not df_current.empty:
-            df_current.iloc[:-1].to_csv(CSV_FILE, index=False)
-            st.cache_data.clear()
-            st.warning("Last entry removed.")
-            st.rerun()
