@@ -52,7 +52,7 @@ def calculate_acwr(group):
 if filtered_df.empty:
     st.warning("No data found for the selected filters.")
 else:
-    # ... proceeding to calculate ACWR and plot ...
+    df_acwr = filtered_df.copy()
 
 
 
