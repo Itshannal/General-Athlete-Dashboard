@@ -38,7 +38,7 @@ if isinstance(date_range, tuple) and len(date_range) == 2:
 
 
 # ---CALCULATE ACWR  ---
-ddef calculate_acwr(group):
+def calculate_acwr(group):
     group = group.sort_values('Date')
     # Use 'on' if Date is a column, or set_index if you prefer
     group = group.set_index('Date')
