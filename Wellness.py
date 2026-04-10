@@ -52,18 +52,29 @@ if isinstance(date_range, tuple) and len(date_range) == 2:
 
 # --- FIXED ACWR CALCULATION ---
 def calculate_acwr(group):
-    # Sort and set index to handle time-based rolling windows
+    # 1. Capture the ID immediately so we don't lose it
+    current_id = group['Athlete_ID'].iloc[0]
+    
+    # 2. Sort and handle index
     group = group.sort_values('Date').set_index('Date')
     
-    # We use '7D' and '28D' but fill missing days with 0 so the average is accurate
-    # Reindexing to a daily frequency ensures rest days are counted as 0 load
+    # 3. Create a complete date range for this specific athlete
     idx = pd.date_range(group.index.min(), group.index.max())
-    group = group.reindex(idx).fillna({'Load': 0, 'Athlete_ID': group['Athlete_ID'].iloc[0]})
     
-    acute = group['Load'].rolling(window='7D').mean()
-    chronic = group['Load'].rolling(window='28D').mean()
+    # 4. Reindex and fill only the numeric Load with 0
+    group = group.reindex(idx)
+    group['Load'] = group['Load'].fillna(0)
+    
+    # 5. Restore the Athlete_ID for the newly created date rows
+    group['Athlete_ID'] = current_id
+    
+    # 6. Calculate rolling metrics
+    # window='7D' looks at the last 7 days of the index
+    acute = group['Load'].rolling(window='7D', min_periods=1).mean()
+    chronic = group['Load'].rolling(window='28D', min_periods=1).mean()
     
     group['ACWR'] = (acute / chronic)
+    
     return group.reset_index().rename(columns={'index': 'Date'})
 
 if not filtered_df.empty:
