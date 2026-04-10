@@ -38,18 +38,21 @@ if isinstance(date_range, tuple) and len(date_range) == 2:
 
 
 # ---CALCULATE ACWR  ---
-def calculate_acwr(group):
-    group = group.sort_values('Date').set_index('Date')
+ddef calculate_acwr(group):
+    group = group.sort_values('Date')
+    # Use 'on' if Date is a column, or set_index if you prefer
+    group = group.set_index('Date')
+    # Numeric_only=True ensures we don't try to roll on the Athlete_ID string
     acute = group['Load'].rolling(window='7D').mean()
     chronic = group['Load'].rolling(window='28D').mean()
     group['ACWR'] = (acute / chronic)
     return group.reset_index()
 
 
-if not filtered_df.empty:
-    df_acwr = filtered_df.groupby('Athlete_ID', group_keys=False).apply(calculate_acwr)
+if filtered_df.empty:
+    st.warning("No data found for the selected filters.")
 else:
-    df_acwr = filtered_df.copy()
+    # ... proceeding to calculate ACWR and plot ...
 
 
 
@@ -128,7 +131,8 @@ with tab_load:
 
 
     st.subheader("Weekly Player Load")
-    fig_load = px.line(df_acwr, x='Date', y='Load', color='Athlete_ID', markers=True)
+    df_plot = df_acwr.groupby(['Date', 'Athlete_ID'], as_index=False)['Load'].sum()
+    fig_load = px.line(df_plot, x='Date', y='Load', color='Athlete_ID', markers=True)
     st.plotly_chart(fig_load, use_container_width=True)
 
     st.subheader("High Speed Distance (HSD)")
