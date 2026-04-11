@@ -128,7 +128,7 @@ with tab_load:
 
 
     st.subheader("Weekly Player Load")
-    st.write(df_acwr.shape)
+    st.write(df_acwr.columns.tolist())
     fig_load = px.line(df_acwr, x='Date', y='Load', color='Athlete_ID', markers=True)
     st.plotly_chart(fig_load, use_container_width=True)
 
