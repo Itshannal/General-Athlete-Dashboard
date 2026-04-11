@@ -16,6 +16,8 @@ def load_data():
 
 df = load_data()
 
+df.columns = df.columns.str.strip()
+
 ################ Sidebar Filters ################
 st.sidebar.header("Filters")
 athlete_list = ["All"] + list(df['Athlete_ID'].unique())
@@ -38,6 +40,8 @@ if isinstance(date_range, tuple) and len(date_range) == 2:
 
 
 # ---CALCULATE ACWR  ---
+df = df.sort_values(by=['Athlete_ID', 'Date'])
+
 def calculate_acwr(group):
     group = group.sort_values('Date').set_index('Date')
     acute = group['Load'].rolling(window='7D').mean()
@@ -58,8 +62,6 @@ st.title("Athlete Monitoring")
 tab_load, tab_recovery, tab_analysis, tab_entry  = st.tabs(["Training Load", "Recovery & Wellness", "Advanced Analysis", "Data Entry"])
 
 # --- TAB 1: TRAINING LOAD ---
-st.write(df.columns.tolist())
-st.write(df.head())
 
 with tab_entry:
     st.header(" Data Entry")
