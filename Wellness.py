@@ -58,6 +58,9 @@ st.title("Athlete Monitoring")
 tab_load, tab_recovery, tab_analysis, tab_entry  = st.tabs(["Training Load", "Recovery & Wellness", "Advanced Analysis", "Data Entry"])
 
 # --- TAB 1: TRAINING LOAD ---
+st.write(df.columns.tolist())
+st.write(df.head())
+
 with tab_entry:
     st.header(" Data Entry")
 
@@ -128,7 +131,6 @@ with tab_load:
 
 
     st.subheader("Weekly Player Load")
-    st.write(df_acwr.columns.tolist())
     fig_load = px.line(df_acwr, x='Date', y='Load', color='Athlete_ID', markers=True)
     st.plotly_chart(fig_load, use_container_width=True)
 
