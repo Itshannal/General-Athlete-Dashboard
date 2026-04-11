@@ -63,6 +63,11 @@ tab_load, tab_recovery, tab_analysis, tab_entry  = st.tabs(["Training Load", "Re
 
 # --- TAB 1: TRAINING LOAD ---
 
+st.write(df_acwr.dtypes)
+st.write(df_acwr.isna().sum())
+st.write(df_acwr.head())
+
+
 with tab_entry:
     st.header(" Data Entry")
 
